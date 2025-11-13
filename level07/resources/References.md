@@ -1,0 +1,3 @@
+- [Labor of Division (Episode I)](https://ridiculousfish.com/blog/posts/labor-of-division-episode-i.html) - Excellent explanation of magic number division
+- [Compiler Optimizations for Division](https://en.wikipedia.org/wiki/Division_algorithm#Division_by_a_constant)
+- [Ret2libc Technique](https://en.wikipedia.org/wiki/Return-to-libc_attack)
