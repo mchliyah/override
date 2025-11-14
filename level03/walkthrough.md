@@ -1,68 +1,63 @@
-Level03 Complete Walkthrough
-Problem Analysis
-SUID binary level03 owned by level04
+# Level03
 
-Program asks for a password and validates it
+## Binary Analysis
 
-Uses hardcoded value 0x1337d00d (322424845) and a switch statement
+`level03` is a SUID binary owned by `level04`. The program prompts for a password and validates it against a predictable algorithm that uses a hardcoded constant and a switch/jump table.
 
-Reverse Engineering
-From the disassembly:
+Key facts:
+- Hardcoded value: `0x1337d00d` (decimal: 322424845)
+- Validation uses the expression: `result = 0x1337d00d - password` and a switch based on `result`.
 
-asm
-movl $0x1337d00d, 0x4(%esp)  ; Push hardcoded value
-mov %eax,(%esp)              ; Push our input  
-call test                     ; test(input, 0x1337d00d)
-In the test function:
+## Vulnerability
 
-asm
-; Calculate: result = 0x1337d00d - password
-sub %eax,%ecx                ; ecx = 0x1337d00d - input
+From the disassembly the check looks like:
 
-; Check if result <= 21
-cmpl $0x15,-0xc(%ebp)        ; Compare result with 21
-ja   fail_case               ; If result > 21, jump to fail
+```asm
+	movl $0x1337d00d, 0x4(%esp)    ; push hardcoded value
+	mov %eax,(%esp)                ; push user input
+	call test                      ; test(input, 0x1337d00d)
 
-; Otherwise use result in switch statement
-mov -0xc(%ebp),%eax
-shl $0x2,%eax                ; Multiply by 4
-add $0x80489f0,%eax          ; Jump table base
-jmp *%eax                    ; Jump to decrypt case
-The Vulnerability
-The program uses a predictable algorithm
+; inside test:
+	sub %eax,%ecx                  ; ecx = 0x1337d00d - input
+	cmpl $0x15,-0xc(%ebp)          ; compare result with 21
+	ja   fail_case                 ; if result > 21 -> fail
+	mov -0xc(%ebp),%eax
+	shl $0x2,%eax                  ; index * 4
+	add $0x80489f0,%eax            ; jump table base
+	jmp *%eax                      ; jump to case
+```
 
-We need: 0x1337d00d - password <= 21
+The check effectively requires `0x1337d00d - password <= 21` (and >= 0), so valid passwords are in a small, contiguous range.
 
-So: password >= 322424845 - 21 = 322424824
+## Exploitation
 
-And: password <= 322424845 (since result >= 0)
+Solve the inequality:
 
-Solution
-The correct password is any value between 322424824 and 322424845. We used 322424827 which worked.
+- password >= 322424845 - 21 = 322424824
+- password <= 322424845
 
-Exploitation Steps
-Calculate the password:
+Any value in that range is accepted. For example, `322424827` works.
 
-python
-0x1337d00d = 322424845
-password = 322424845 - 18 = 322424827
-Run the program with the password:
+Run the program and provide the password:
 
-bash
+```bash
 ./level03
 Password: 322424827
-Get shell and retrieve flag:
+```
 
-bash
+Once the check passes, the binary grants a shell as the next privilege level. Retrieve the flag/password for `level04`:
+
+```bash
 cat /home/users/level04/.pass
-kgv3tkEb9h2mLkRsPkXRfc2mHbjMxQzvb2FrgKkf
-Key Learning
-Reverse engineering of assembly code
+# kgv3tkEb9h2mLkRsPkXRfc2mHbjMxQzvb2FrgKkf
+```
 
-Switch statement analysis in compiled binaries
+## Key Learning
 
-Mathematical constraints in password validation
+- Read the disassembly to extract numeric constraints rather than relying on brute force.
+- Switch/jump-table based checks often reduce the valid input set to a small range.
+- SUID binaries with predictable checks can be escalated when validation is weak.
 
-SUID exploitation to gain higher privileges
+## Result
 
-The level04 password is: kgv3tkEb9h2mLkRsPkXRfc2mHbjMxQzvb2FrgKkf
+Level04 password: `kgv3tkEb9h2mLkRsPkXRfc2mHbjMxQzvb2FrgKkf`
